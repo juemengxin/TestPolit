@@ -1,0 +1,15 @@
+.git
+.venv
+**/__pycache__
+**/*.pyc
+**/.env
+backend/.secret_key
+backend/.local-access.txt
+backend/.mobile-mcp-auth
+backend/db.sqlite3*
+backend/media
+backend/backups
+frontend
+**/*.log
+.DS_Store
+.runtime

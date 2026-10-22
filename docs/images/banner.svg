@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="360" viewBox="0 0 1280 360">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#4F46E5"/>
+      <stop offset="0.55" stop-color="#6366F1"/>
+      <stop offset="1" stop-color="#8B5CF6"/>
+    </linearGradient>
+    <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse">
+      <path d="M32 0H0V32" fill="none" stroke="#ffffff" stroke-opacity="0.07"/>
+    </pattern>
+    <filter id="sh" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#1e1b4b" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+  <rect width="1280" height="360" rx="24" fill="url(#bg)"/>
+  <rect width="1280" height="360" rx="24" fill="url(#grid)"/>
+
+  <!-- Logo -->
+  <g transform="translate(80 92)" filter="url(#sh)">
+    <rect width="88" height="88" rx="22" fill="#ffffff"/>
+    <text x="44" y="64" text-anchor="middle" font-family="Inter, -apple-system, Segoe UI, Helvetica, Arial, sans-serif" font-size="56" font-weight="800" fill="#4F46E5">T</text>
+    <circle cx="70" cy="62" r="7" fill="#22D3EE"/>
+  </g>
+
+  <text x="80" y="246" font-family="Inter, -apple-system, Segoe UI, Helvetica, Arial, sans-serif" font-size="64" font-weight="800" fill="#ffffff" letter-spacing="-1">TestPilot</text>
+  <text x="82" y="290" font-family="PingFang SC, Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="24" fill="#E0E7FF">AI 驱动的一站式智能测试平台</text>
+  <text x="82" y="324" font-family="Inter, -apple-system, Segoe UI, Helvetica, Arial, sans-serif" font-size="16" fill="#C7D2FE" letter-spacing="2">REQUIREMENTS → CASES → AUTOMATION → REPORTS → TRIAGE</text>
+
+  <!-- Pipeline cards -->
+  <g font-family="PingFang SC, Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="18" font-weight="600" text-anchor="middle">
+    <g stroke="#ffffff" stroke-opacity="0.55" stroke-width="2" stroke-dasharray="6 6" fill="none">
+      <path d="M830 110 H900"/>
+      <path d="M1040 110 V170"/>
+      <path d="M970 250 H900"/>
+      <path d="M760 170 V140"/>
+    </g>
+    <g filter="url(#sh)">
+      <rect x="690" y="70" width="140" height="70" rx="16" fill="#ffffff"/>
+      <rect x="900" y="70" width="280" height="70" rx="16" fill="#ffffff"/>
+      <rect x="970" y="210" width="210" height="80" rx="16" fill="#ffffff"/>
+      <rect x="690" y="170" width="210" height="120" rx="16" fill="#ffffff"/>
+    </g>
+    <text x="760" y="112" fill="#4338CA">📄 需求</text>
+    <text x="1040" y="112" fill="#4338CA">🤖 LangGraph 生成用例</text>
+    <text x="1075" y="242" fill="#4338CA">⚙️ Worker 执行</text>
+    <text x="1075" y="270" font-size="13" font-weight="400" fill="#6366F1">HTTP · Playwright · MCP</text>
+    <text x="795" y="212" fill="#4338CA">📊 报告与分诊</text>
+    <g font-size="13" font-weight="500" text-anchor="start">
+      <rect x="712" y="230" width="72" height="24" rx="12" fill="#DCFCE7"/>
+      <text x="726" y="247" fill="#15803D">通过 4</text>
+      <rect x="792" y="230" width="86" height="24" rx="12" fill="#FEE2E2"/>
+      <text x="806" y="247" fill="#B91C1C">失败 0</text>
+      <rect x="712" y="260" width="166" height="8" rx="4" fill="#E0E7FF"/>
+      <rect x="712" y="260" width="166" height="8" rx="4" fill="#6366F1"/>
+    </g>
+  </g>
+</svg>

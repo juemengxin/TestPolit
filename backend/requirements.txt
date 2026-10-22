@@ -1,0 +1,10 @@
+Django>=5.2,<5.3
+djangorestframework>=3.16,<3.17
+cryptography>=44,<47
+python-dotenv>=1,<2
+langgraph>=1,<2
+langchain-openai>=1,<2
+httpx>=0.28,<1
+pypdf>=6,<7
+python-docx>=1,<2
+playwright>=1.55,<2

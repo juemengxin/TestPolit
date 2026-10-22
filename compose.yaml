@@ -1,0 +1,76 @@
+name: testpilot
+
+x-backend: &backend
+  image: testpilot-backend:local
+  build:
+    context: .
+    dockerfile: backend/Dockerfile
+  restart: unless-stopped
+  init: true
+  shm_size: 1gb
+  environment:
+    TESTPILOT_DATA_DIR: /data
+    # Use the Linux browser supplied by the official Selenium base image.
+    TESTPILOT_BROWSER_CHANNEL: ""
+    TESTPILOT_BROWSER_EXECUTABLE: /usr/bin/google-chrome
+  volumes:
+    - type: bind
+      source: ./backend
+      target: /data
+    - type: bind
+      source: ./backend/.env
+      target: /app/backend/.env
+      read_only: true
+    - type: bind
+      source: ./backend/.env
+      target: /data/.env
+      read_only: true
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+  stop_grace_period: 30s
+
+services:
+  frontend:
+    image: testpilot-frontend:local
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${TESTPILOT_FRONTEND_PORT:-5173}:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/healthz"]
+      interval: 15s
+      timeout: 5s
+      start_period: 5s
+      retries: 3
+
+  api:
+    <<: *backend
+    command: ["web"]
+    ports:
+      - "127.0.0.1:${TESTPILOT_BACKEND_PORT:-8001}:8000"
+    environment:
+      TESTPILOT_DATA_DIR: /data
+      TESTPILOT_BROWSER_CHANNEL: ""
+      TESTPILOT_BROWSER_EXECUTABLE: /usr/bin/google-chrome
+      SE_START_XVFB: "true"
+      SE_START_VNC: "true"
+      SE_START_NO_VNC: "true"
+      SE_VNC_NO_PASSWORD: "1"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/auth/session/', timeout=5).read()"]
+      interval: 30s
+      timeout: 6s
+      start_period: 30s
+      retries: 3
+
+  worker:
+    <<: *backend
+    command: ["worker"]
+    depends_on:
+      api:
+        condition: service_healthy
