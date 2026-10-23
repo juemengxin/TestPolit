@@ -11,7 +11,10 @@ ARG PIP_INDEX_URL=https://pypi.org/simple
 COPY backend/requirements-lock.txt ./requirements-lock.txt
 # Reuse the official image's Python environment and installed Chrome.
 RUN python -m pip install --disable-pip-version-check -r requirements-lock.txt gunicorn==23.0.0 \
-    && python -m playwright install ffmpeg
+    && python -m playwright install ffmpeg \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends antiword \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY backend/ ./
 COPY docker/backend-entrypoint.sh /usr/local/bin/testpilot-entrypoint

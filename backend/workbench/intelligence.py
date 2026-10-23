@@ -164,7 +164,15 @@ def run_ai(job,record):
     prompts=[]
     for field in ['prompt_id','template_id','strategy_id']:
         if payload.get(field):
-            item=Entity.objects.get(pk=payload[field],project=job.project);prompts.append(item.content+'\n'+json.dumps(item.config,ensure_ascii=False))
+            item=(payload.get('template_snapshot') if field=='template_id' else None)
+            if item is None:
+                item=Entity.objects.get(pk=payload[field],project=job.project)
+            if field=='template_id':
+                prompts.append('用户选择的用例模板（优先参考其中的字段名称、结构、字段说明、顺序与示例）：\n'
+                               +item.content+'\n'+json.dumps(item.config,ensure_ascii=False)
+                               +'\n生成结果仍须符合本任务规定的 JSON 结构；将模板列映射到对应字段，不要照搬示例业务数据。')
+            else:
+                prompts.append(item.content+'\n'+json.dumps(item.config,ensure_ascii=False))
     if payload.get('agent_id'):
         agent=Resource.objects.get(pk=payload['agent_id'],project=job.project,kind='agent',enabled=True)
         prompts.append(agent.settings.get('instructions',''))

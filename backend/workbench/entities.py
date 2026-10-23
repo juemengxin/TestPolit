@@ -1,4 +1,4 @@
-import json, math, hashlib, re, zipfile, subprocess, tempfile
+import json, math, hashlib, re, zipfile, subprocess, tempfile, shutil
 from pathlib import Path
 from django.db import transaction
 from rest_framework import serializers
@@ -128,18 +128,67 @@ def parse_document(file):
         document=Document(file)
         text='\n'.join([p.text for p in document.paragraphs]+[' | '.join(c.text for c in row.cells) for t in document.tables for row in t.rows])
     elif suffix=='.doc':
-        # Legacy binary Word documents are converted by the macOS local runtime.
-        # Use a fixed executable and arguments; uploaded names never enter the command line.
+        # Keep converter selection explicit: textutil serves macOS, antiword serves Linux containers.
+        # Uploaded filenames never enter the command line.
         with tempfile.TemporaryDirectory(prefix='testpilot-doc-') as directory:
             source=Path(directory)/'source.doc';target=Path(directory)/'source.txt'
             source.write_bytes(file.read())
+            textutil=shutil.which('textutil') or ('/usr/bin/textutil' if Path('/usr/bin/textutil').is_file() else None)
+            antiword=shutil.which('antiword')
+            if not textutil and not antiword:
+                raise ValueError('DOC 解析工具不可用，请转换为 DOCX 或 Markdown 后重试')
             try:
-                result=subprocess.run(['/usr/bin/textutil','-convert','txt','-encoding','UTF-8','-output',str(target),str(source)],
-                                      capture_output=True,timeout=20,check=False)
+                if textutil:
+                    result=subprocess.run([textutil,'-convert','txt','-encoding','UTF-8','-output',str(target),str(source)],
+                                          capture_output=True,timeout=20,check=False)
+                    if result.returncode or not target.exists():
+                        raise ValueError('DOC 文件解析失败，请确认文件未损坏或转换为 DOCX 后重试')
+                    text=target.read_text(encoding='utf-8',errors='replace')
+                else:
+                    result=subprocess.run([antiword,str(source)],capture_output=True,timeout=20,check=False)
+                    if result.returncode:
+                        raise ValueError('DOC 文件解析失败，请确认文件未损坏或转换为 DOCX 后重试')
+                    text=result.stdout.decode('utf-8',errors='replace')
             except (OSError,subprocess.TimeoutExpired) as exc:
                 raise ValueError('DOC 解析工具不可用，请转换为 DOCX 或 Markdown 后重试') from exc
-            if result.returncode or not target.exists():raise ValueError('DOC 文件解析失败，请确认文件未损坏或转换为 DOCX 后重试')
-            text=target.read_text(encoding='utf-8',errors='replace')
+    elif suffix=='.xlsx':
+        try:
+            with zipfile.ZipFile(file) as archive:
+                if sum(item.file_size for item in archive.infolist())>30*1024*1024:
+                    raise ValueError('Excel 文件解压后超过 30MB')
+            file.seek(0)
+            from openpyxl import load_workbook
+            from openpyxl.utils.exceptions import InvalidFileException
+            workbook=load_workbook(file,read_only=True,data_only=True)
+        except (OSError,zipfile.BadZipFile,ValueError,InvalidFileException) as exc:
+            if isinstance(exc,ValueError) and str(exc)=='Excel 文件解压后超过 30MB':raise
+            raise ValueError('Excel 文件无法解析，请确认文件未损坏') from exc
+        try:
+            lines=[];cell_count=0
+            for sheet in workbook.worksheets[:20]:
+                lines.append(f'## 工作表：{sheet.title}')
+                headers=[]
+                for row_number,row in enumerate(sheet.iter_rows(values_only=True),start=1):
+                    if row_number>200 or cell_count>=20000:break
+                    values=[]
+                    for value in row[:50]:
+                        cell_count+=1
+                        if value is None:values.append('');continue
+                        value=value.isoformat() if hasattr(value,'isoformat') else str(value)
+                        values.append(value[:1000])
+                    if not any(values):continue
+                    if row_number==1:
+                        headers=[value.strip() or f'列{index}' for index,value in enumerate(values,start=1)]
+                        lines.append('列名：'+' | '.join(headers))
+                    else:
+                        cells=[f'{headers[index] if index<len(headers) else f"列{index+1}"}：{value}'
+                               for index,value in enumerate(values) if value.strip()]
+                        if cells:lines.append('- '+'；'.join(cells))
+                    if cell_count>=20000:break
+                if cell_count>=20000:break
+            text='\n'.join(lines)
+        finally:
+            workbook.close()
     elif suffix in ['.txt','.md','.json','.csv']:
         text=file.read().decode('utf-8-sig')
     else: raise ValueError('支持 UTF-8 TXT、MD、JSON、CSV、DOCX 与有文本层的 PDF')

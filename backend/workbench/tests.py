@@ -83,6 +83,42 @@ class APITests(TestCase):
         res=self.client.patch(f'/api/resources/{obj.pk}/',{'name':'Renamed'},format='json')
         self.assertTrue(res.data['has_secret'])
         self.assertEqual(res.data['mode'],'simulation')
+    def test_resource_apply_to_projects_copies_encrypted_config_and_checks_target_permissions(self):
+        model=Resource.objects.create(project=self.project,kind='model',name='Shared Model',endpoint='https://model.example/v1',secret_encrypted='encrypted-value',settings={'model_name':'test-model'})
+        response=self.client.post(f'/api/resources/{model.pk}/apply-to-projects/',{'project_ids':[self.other.pk]},format='json')
+        self.assertEqual(response.status_code,400)  # target project is not accessible
+        self.assertFalse(Resource.objects.filter(project=self.other, name='Shared Model').exists())
+
+        target=Project.objects.create(name='Gamma',key='GAMMA',owner=self.owner)
+        response=self.client.post(f'/api/resources/{model.pk}/apply-to-projects/',{'project_ids':[target.pk]},format='json')
+        self.assertEqual(response.status_code,200,response.data)
+        clone=Resource.objects.get(project=target,name='Shared Model')
+        self.assertEqual(clone.secret_encrypted,'encrypted-value')
+        self.assertEqual(clone.settings,model.settings)
+        self.assertNotIn('encrypted-value',str(response.data))
+        self.assertTrue(response.data['results'][0]['created'])
+
+        response=self.client.post(f'/api/resources/{model.pk}/apply-to-projects/',{'project_ids':[target.pk]},format='json')
+        self.assertEqual(response.status_code,200,response.data)
+        self.assertEqual(Resource.objects.filter(project=target,name='Shared Model').count(),1)
+        self.assertFalse(response.data['results'][0]['created'])
+
+    def test_agent_apply_copies_and_remaps_linked_resources_and_requires_editor_target(self):
+        model=Resource.objects.create(project=self.project,kind='model',name='Agent Model')
+        skill=Resource.objects.create(project=self.project,kind='skill',name='Agent Skill')
+        agent=Resource.objects.create(project=self.project,kind='agent',name='Agent',settings={'instructions':'run','resource_ids':[model.pk,skill.pk]})
+        target=Project.objects.create(name='Gamma',key='GAMMA',owner=self.owner)
+        response=self.client.post(f'/api/resources/{agent.pk}/apply-to-projects/',{'project_ids':[target.pk]},format='json')
+        self.assertEqual(response.status_code,200,response.data)
+        copied_agent=Resource.objects.get(project=target,kind='agent',name='Agent')
+        copied_ids=copied_agent.settings['resource_ids']
+        self.assertEqual(len(copied_ids),2)
+        self.assertEqual(set(Resource.objects.filter(project=target,pk__in=copied_ids).values_list('kind',flat=True)),{'model','skill'})
+
+        editor_target=Project.objects.create(name='Editor Target',key='EDTARGET',owner=self.outsider)
+        Membership.objects.create(project=editor_target,user=self.owner,role='viewer')
+        denied=self.client.post(f'/api/resources/{agent.pk}/apply-to-projects/',{'project_ids':[editor_target.pk]},format='json')
+        self.assertEqual(denied.status_code,403)
     def test_plaintext_secret_settings_rejected(self):
         res=self.client.post('/api/resources/',{'project':self.project.pk,'kind':'model','name':'Unsafe','settings':{'api_key':'sensitive'}},format='json')
         self.assertEqual(res.status_code,400)

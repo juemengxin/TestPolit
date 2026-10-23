@@ -103,6 +103,10 @@ def _validate_entity_record_references(project, payload: dict) -> None:
     for field in ('entity_id', 'environment_id', 'prompt_id', 'template_id', 'strategy_id'):
         if payload.get(field) and not Entity.objects.filter(project=project, pk=payload[field]).exists():
             raise ValidationError(f'{field} 不属于当前项目')
+    if payload.get('template_id') is not None and not Entity.objects.filter(
+        project=project,pk=payload['template_id'],kind='case_template'
+    ).exists():
+        raise ValidationError('template_id 必须引用当前项目的用例模板')
 
 
 def _validate_design_source(project, payload: dict, kind: str) -> None:
@@ -293,6 +297,10 @@ def _capture_submission_snapshots(project, payload: dict) -> None:
         Entity.objects.filter(project=project, pk__in=related_ids)
         .values('id', 'kind', 'name', 'content', 'config', 'version')
     )
+    if payload.get('template_id') is not None:
+        payload['template_snapshot'] = Entity.objects.filter(
+            project=project,pk=payload['template_id'],kind='case_template'
+        ).values('id','name','content','config','version').first()
     payload['cases'] = list(
         Asset.objects.filter(project=project, pk__in=payload.get('case_ids', [])).values(
             'id', 'name', 'description', 'priority', 'data', 'updated_at'

@@ -123,6 +123,71 @@ class ScopedViewSet(viewsets.ModelViewSet):
         instance.delete()
 
 class ResourceViewSet(ScopedViewSet):
+    @action(detail=True, methods=['post'], url_path='apply-to-projects')
+    @transaction.atomic
+    def apply_to_projects(self, request, pk=None):
+        """Copy a capability and its linked Agent resources into writable projects."""
+        source = self.get_object()
+        require_write(request.user, source.project)
+        project_ids = request.data.get('project_ids')
+        if (not isinstance(project_ids, list) or not project_ids or len(project_ids) > 50
+                or any(type(project_id) is not int for project_id in project_ids)):
+            raise ValidationError({'project_ids': '请选择 1 到 50 个有效项目'})
+        if len(set(project_ids)) != len(project_ids):
+            raise ValidationError({'project_ids': '项目不能重复'})
+
+        targets = list(projects_for(request.user).filter(pk__in=project_ids))
+        if len(targets) != len(project_ids):
+            raise ValidationError({'project_ids': '部分项目不存在或无权访问'})
+        for target in targets:
+            require_write(request.user, target)
+        if source.project_id in project_ids:
+            raise ValidationError({'project_ids': '目标项目不能包含当前项目'})
+
+        linked_resources = []
+        if source.kind == 'agent':
+            resource_ids = source.settings.get('resource_ids', [])
+            if not isinstance(resource_ids, list) or any(type(item_id) is not int for item_id in resource_ids):
+                raise ValidationError('Agent 关联资源配置无效')
+            linked_resources = list(Resource.objects.filter(project=source.project, pk__in=resource_ids))
+            if len(linked_resources) != len(set(resource_ids)):
+                raise ValidationError('Agent 关联资源缺失或不属于当前项目')
+
+        def copy_resource(resource, target, resource_ids=None):
+            """Reuse same-name target resources; otherwise clone without exposing secrets."""
+            existing = Resource.objects.filter(project=target, kind=resource.kind, name=resource.name).first()
+            if existing:
+                return existing, False
+            settings_copy = dict(resource.settings)
+            if resource_ids is not None:
+                settings_copy['resource_ids'] = resource_ids
+            clone = Resource.objects.create(
+                project=target, kind=resource.kind, name=resource.name,
+                description=resource.description, endpoint=resource.endpoint,
+                secret_encrypted=resource.secret_encrypted, settings=settings_copy,
+                enabled=resource.enabled, mode=resource.mode,
+            )
+            return clone, True
+
+        results = []
+        for target in targets:
+            created_count = 0
+            id_map = {}
+            for linked in linked_resources:
+                copied, created = copy_resource(linked, target)
+                id_map[linked.pk] = copied.pk
+                created_count += int(created)
+            copied, created = copy_resource(
+                source, target,
+                [id_map[item_id] for item_id in source.settings.get('resource_ids', [])]
+                if source.kind == 'agent' else None,
+            )
+            created_count += int(created)
+            results.append({'project_id': target.pk, 'project_name': target.name,
+                            'resource_id': copied.pk, 'created': created,
+                            'created_count': created_count})
+        return Response({'results': results}, status=status.HTTP_200_OK)
+
     def perform_destroy(self, instance):
         for asset in Asset.objects.filter(project=instance.project):
             if asset.data.get('agent_id') == instance.pk:

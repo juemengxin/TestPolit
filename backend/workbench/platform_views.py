@@ -395,6 +395,40 @@ class EntityViewSet(ScopedViewSet):
         return Response(created,status=201)
     @action(detail=False,methods=['post'])
     @transaction.atomic
+    def import_case_template_excel(self,request):
+        """Import a spreadsheet as a reusable case-generation template."""
+        project=get_object_or_404(projects_for(request.user),pk=request.data.get('project'))
+        require_write(request.user,project)
+        upload=request.FILES.get('file')
+        if not upload or upload.size>10*1024*1024:
+            raise ValidationError('用例模板文件需小于 10 MB')
+        if Path(upload.name).suffix.lower()!='.xlsx':
+            raise ValidationError('仅支持 Excel 工作簿（.xlsx）')
+        try:
+            from .entities import parse_document
+            content=parse_document(upload)
+        except ValueError as exc:
+            raise ValidationError(str(exc)) from exc
+        upload.seek(0)
+        if not content.strip():
+            raise ValidationError('Excel 文件中没有可导入的用例模板内容')
+        name=Path(upload.name).stem.strip()[:150]
+        if not name:
+            raise ValidationError('Excel 文件名无效')
+        headers=[]
+        for line in content.splitlines():
+            if line.startswith('列名：'):
+                headers=[value.strip() for value in line.removeprefix('列名：').split('|') if value.strip()]
+                if headers:
+                    break
+        entity=Entity.objects.create(project=project,kind='case_template',name=name,content=content,
+            config={'source_format':'xlsx','required_fields':headers},created_by=request.user)
+        save_revision(entity,request.user)
+        Artifact.objects.create(project=project,entity=entity,file=upload,name=Path(upload.name).name,category='case_template')
+        audit(request.user,project,'case_template.import_excel',entity.pk)
+        return Response(self.get_serializer(entity).data,status=201)
+    @action(detail=False,methods=['post'])
+    @transaction.atomic
     def import_requirement(self,request):
         project=get_object_or_404(projects_for(request.user),pk=request.data.get('project'));require_write(request.user,project)
         file=request.FILES.get('file')
@@ -468,7 +502,7 @@ class ArtifactViewSet(ScopedViewSet):
         entity=get_object_or_404(Entity.objects.filter(project__in=projects_for(request.user)),pk=request.data.get('entity'));require_write(request.user,entity.project)
         file=request.FILES.get('file')
         if not file or file.size>10*1024*1024: raise ValidationError('文件需小于 10MB')
-        if Path(file.name).suffix.lower() not in ['.txt','.md','.json','.csv','.pdf','.doc','.docx']: raise ValidationError('不支持此文档类型')
+        if Path(file.name).suffix.lower() not in ['.txt','.md','.json','.csv','.pdf','.doc','.docx','.xlsx']: raise ValidationError('不支持此文档类型')
         artifact=Artifact.objects.create(project=entity.project,entity=entity,file=file,name=Path(file.name).name)
         job=Job.objects.create(project=entity.project,kind='ingest',name='解析文档：'+entity.name,mode='local',payload={'entity_id':entity.pk,'artifact_id':artifact.pk,'source_version':entity.version},created_by=request.user)
         return Response({'artifact':self.get_serializer(artifact).data,'job':job.pk},status=202)

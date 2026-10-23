@@ -12,7 +12,7 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 from .models import Project,Membership,Entity,Resource,Job,Asset,KnowledgeChunk,Artifact,AccessKey,MachineConnection,Run,Attachment
 from .job_worker import claim_job,execute_job,safe_model_status_error,safe_ui_error
-from .entities import hash_vector
+from .entities import hash_vector, parse_document
 from .security import allowed_url
 from .executors import prepare_variables,prepare_api_request,validate_config
 
@@ -771,6 +771,59 @@ class PlatformTests(TestCase):
         self.assertEqual(KnowledgeChunk.objects.filter(document_id=doc['id']).count(),1)
         self.assertEqual(Entity.objects.get(pk=doc['id']).version,2)
         result=self.client.post(f'/api/entities/{kb["id"]}/search/',{'query':'登录权限'},format='json');self.assertTrue(result.data)
+    def test_excel_case_template_upload_is_parsed_and_selectable_for_generation(self):
+        template=self.entity('case_template',name='企业 Excel 用例模板',content='用例编号、场景、前置条件、操作步骤、预期结果')
+        template_entity=Entity.objects.get(pk=template['id'])
+        from .spreadsheet_export import export_entities_xlsx
+        workbook=export_entities_xlsx([template_entity])
+        response=self.client.post('/api/artifacts/',{
+            'entity':template['id'],'file':SimpleUploadedFile('case-template.xlsx',workbook,
+                content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')},format='multipart')
+        self.assertEqual(response.status_code,202,response.data)
+        job=self.execute(Job.objects.get(pk=response.data['job']))
+        self.assertEqual(job.status,'completed',job.result)
+        parsed=Entity.objects.get(pk=template['id'])
+        self.assertIn('工作表：测试用例',parsed.content)
+        self.assertIn('前置条件',parsed.content)
+        generation=self.job(payload={'text':'用户登录需求','template_id':template['id']})
+        self.assertEqual(generation.payload['template_id'],template['id'])
+        self.assertEqual(generation.payload['template_snapshot']['version'],parsed.version)
+        self.assertIn('前置条件',generation.payload['template_snapshot']['content'])
+        wrong_kind=self.entity('prompt',name='不是用例模板')
+        invalid=self.client.post('/api/jobs/',{'project':self.project.pk,'kind':'generate','payload':{
+            'text':'用户登录需求','template_id':wrong_kind['id']}},format='json')
+        self.assertEqual(invalid.status_code,400,invalid.data)
+    def test_excel_import_creates_case_template_and_checks_project_write_access(self):
+        from .spreadsheet_export import export_entities_xlsx
+        source=self.entity('case_template',name='登录模板',content='用例名称、前置条件、步骤、预期结果')
+        workbook=export_entities_xlsx([Entity.objects.get(pk=source['id'])])
+        response=self.client.post('/api/entities/import_case_template_excel/',{
+            'project':self.project.pk,
+            'file':SimpleUploadedFile('团队用例模板.xlsx',workbook,
+                content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')},format='multipart')
+        self.assertEqual(response.status_code,201,response.data)
+        imported=Entity.objects.get(pk=response.data['id'])
+        self.assertEqual(imported.kind,'case_template')
+        self.assertEqual(imported.name,'团队用例模板')
+        self.assertEqual(imported.config['source_format'],'xlsx')
+        self.assertIn('工作表：测试用例',imported.content)
+        self.assertTrue(imported.files.filter(category='case_template').exists())
+        self.assertEqual(imported.revisions.count(),1)
+
+        self.client.force_authenticate(self.viewer)
+        forbidden=self.client.post('/api/entities/import_case_template_excel/',{
+            'project':self.project.pk,
+            'file':SimpleUploadedFile('forbidden.xlsx',workbook,
+                content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')},format='multipart')
+        self.assertEqual(forbidden.status_code,403,forbidden.data)
+    def test_parse_legacy_doc_with_linux_antiword(self):
+        upload=SimpleUploadedFile('legacy.doc',b'legacy Word document')
+        completed=SimpleNamespace(returncode=0,stdout='登录需求正文'.encode())
+        with patch('workbench.entities.shutil.which',side_effect=lambda name:'/usr/bin/antiword' if name=='antiword' else None),\
+             patch('workbench.entities.Path.is_file',return_value=False),\
+             patch('workbench.entities.subprocess.run',return_value=completed) as run:
+            self.assertEqual(parse_document(upload),'登录需求正文')
+        self.assertEqual(run.call_args.args[0][0],'/usr/bin/antiword')
     def test_mcp_requires_owner_approval(self):
         resource=Resource.objects.create(project=self.project,kind='mcp',name='MCP')
         job=self.job('mcp',{'resource_id':resource.pk,'tool':'lookup','arguments':{}},'live')
